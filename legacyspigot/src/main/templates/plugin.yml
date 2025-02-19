@@ -3,6 +3,7 @@ name: AdvancedPortals
 version: ${pluginVersion}
 author: sekwah41
 description: An advanced portals plugin for bukkit.
+folia-supported: true
 api-version: 1.8.8
 softdepend: [PlaceholderAPI]
 commands:
