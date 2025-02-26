@@ -5,6 +5,8 @@ import com.sekwah.advancedportals.core.data.BlockAxis;
 import com.sekwah.advancedportals.core.portal.AdvancedPortal;
 import com.sekwah.advancedportals.core.serializeddata.BlockLocation;
 import java.awt.*;
+import java.lang.reflect.Method;
+
 import org.bukkit.Axis;
 import org.bukkit.Material;
 import org.bukkit.Particle;
@@ -17,15 +19,19 @@ import org.bukkit.block.data.Orientable;
 public class SpigotWorldContainer implements WorldContainer {
     private final World world;
 
-    // Should only be false for 1.13 and 1.13.2, though just to avoid possible
-    // crashes
+    // True if setAge(long) is present on EndGateway, discovered at runtime.
     private static boolean endGatewaySetAgeExists;
+    // Keep a cached reflection Method reference if you want:
+    private static Method endGatewaySetAgeMethod;
 
     static {
         try {
-            endGatewaySetAgeExists =
-                EndGateway.class.getMethod("setAge", long.class) != null;
-        } catch (NoSuchMethodException e) {
+            Method method = EndGateway.class.getMethod("setAge", long.class);
+            if (method != null) {
+                endGatewaySetAgeExists = true;
+                endGatewaySetAgeMethod = method;
+            }
+        } catch (NoSuchMethodException ignored) {
             endGatewaySetAgeExists = false;
         }
     }
@@ -81,23 +87,23 @@ public class SpigotWorldContainer implements WorldContainer {
 
     @Override
     public void disableBeacon(BlockLocation location) {
-        if (!endGatewaySetAgeExists)
-            return;
-        Block block = this.world.getBlockAt(
-            location.getPosX(), location.getPosY(), location.getPosZ());
-        Material blockType = block.getType();
-        if (blockType == Material.END_GATEWAY
-            && block.getState() instanceof EndGateway) {
+        if (!endGatewaySetAgeExists) return;
+        Block block = world.getBlockAt(location.getPosX(), location.getPosY(), location.getPosZ());
+        if (block.getType() == Material.END_GATEWAY && block.getState() instanceof EndGateway) {
             EndGateway endGateway = (EndGateway) block.getState();
-            endGateway.setAge(Long.MIN_VALUE);
-            endGateway.update();
+            try {
+                // Reflectively call setAge(Long.MIN_VALUE)
+                endGatewaySetAgeMethod.invoke(endGateway, Long.MIN_VALUE);
+                endGateway.update();
+            } catch (Exception ex) {
+                // log or ignore
+            }
         }
     }
 
     @Override
     public void disableBeacon(AdvancedPortal portal) {
-        if (!endGatewaySetAgeExists)
-            return;
+        if (!endGatewaySetAgeExists) return;
         BlockLocation maxLoc = portal.getMaxLoc();
         BlockLocation minLoc = portal.getMinLoc();
 
@@ -105,10 +111,14 @@ public class SpigotWorldContainer implements WorldContainer {
             for (int y = minLoc.getPosY(); y <= maxLoc.getPosY(); y++) {
                 for (int z = minLoc.getPosZ(); z <= maxLoc.getPosZ(); z++) {
                     Block block = world.getBlockAt(x, y, z);
-                    if (block.getType() == Material.END_GATEWAY) {
-                        EndGateway tileState = (EndGateway) block.getState();
-                        tileState.setAge(Long.MIN_VALUE);
-                        tileState.update();
+                    if (block.getType() == Material.END_GATEWAY && block.getState() instanceof EndGateway) {
+                        EndGateway endGateway = (EndGateway) block.getState();
+                        try {
+                            endGatewaySetAgeMethod.invoke(endGateway, Long.MIN_VALUE);
+                            endGateway.update();
+                        } catch (Exception ex) {
+                            // log or ignore
+                        }
                     }
                 }
             }

@@ -3,21 +3,23 @@ import java.nio.file.Paths
 import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption
 
-
 buildscript {
     repositories {
-        maven {url "https://plugins.gradle.org/m2/"}
+        maven { url "https://plugins.gradle.org/m2/" }
         mavenCentral()
     }
     dependencies {
+        // Only needed if you have custom Gradle scripts that require these
         classpath "org.apache.httpcomponents:httpmime:4.5.13"
         classpath "com.google.code.gson:gson:2.8.6"
         classpath "org.apache.httpcomponents:httpclient:4.5.13"
     }
 }
 
+// Apply the Shadow plugin at top-level so all subprojects can see it
 plugins {
     id 'org.jetbrains.gradle.plugin.idea-ext' version '1.1.7'
+    id 'com.github.johnrengelman.shadow' version '8.1.1'
 }
 
 apply from: 'env-variables.gradle'
@@ -31,9 +33,12 @@ allprojects {
         options.encoding = 'UTF-8'
     }
 
+    // If not the root project, define a submodules build task
     if (project.name != "Advanced-Portals") {
-        task buildSubmodules doLast {
-            task -> println "Building $task.project.name"
+        task buildSubmodules(type: DefaultTask) {
+            doLast {
+                println "Building $project.name"
+            }
         }
         buildSubmodules.finalizedBy build
     }
@@ -45,16 +50,21 @@ allprojects {
         }
     }
 
-    sourceCompatibility = JavaVersion.VERSION_1_8
-    targetCompatibility = JavaVersion.VERSION_1_8
+    // Use Java 21 for compilation
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
 
+    // Retrieve environment variables from root
     ext.branch = rootProject.ext.branch
     ext.snapshotName = rootProject.ext.snapshotName
     ext.githubSha = rootProject.ext.githubSha
     ext.shaRef = rootProject.ext.shaRef
     ext.isRelease = rootProject.ext.isRelease
 
-    def versionString = (rootProject.file('./version.txt').text + (isRelease ? "" : "-${snapshotName}${shaRef}")).replaceAll('\n', '').replaceAll('\r', '')
+    // Construct a version string (example logic)
+    def versionString = (rootProject.file('./version.txt').text + (isRelease ? "" : "-${snapshotName}${shaRef}"))
+            .replaceAll('\n', '')
+            .replaceAll('\r', '')
     setVersion(versionString)
 
     repositories {
@@ -62,10 +72,16 @@ allprojects {
         maven { url "https://repo.maven.apache.org/maven2" }
         maven { url "https://hub.spigotmc.org/nexus/content/repositories/snapshots/" }
         maven { url "https://oss.sonatype.org/content/repositories/snapshots/" }
-        maven { url "https://nexus.velocitypowered.com/repository/maven-public/" }
+        maven { url "https://repo.papermc.io/repository/maven-public/" } // Folia's repository
+    }
+
+    dependencies {
+        // Example compileOnly for Folia 1.21.4 (Java 21)
+        compileOnly "javax.inject:javax.inject:1"
+        compileOnly "dev.folia:folia-api:1.21.4-R0.1-SNAPSHOT"
+        compileOnly "net.kyori:adventure-api:4.14.0"
     }
 }
-
 
 println("Branch ${ext.branch}${ext.shaRef} isRelease: '${ext.isRelease}'")
 println("Snapshot Name: ${ext.snapshotName}")
@@ -77,8 +93,8 @@ println "Version: ${getVersion()}"
 
 description = ""
 
+// configuration that holds jars to copy into lib
 configurations {
-    // configuration that holds jars to copy into lib
     implementation.extendsFrom(includeLibs)
 }
 
@@ -93,6 +109,15 @@ idea {
             taskTriggers {
                 afterSync(project(':core').tasks.named('generateTemplates').get())
             }
+        }
+    }
+}
+
+// If you still have the 'compilePermissionsGen' dependsOn fix
+subprojects {
+    if (name == "spigot" || name == "legacyspigot") {
+        tasks.matching { it.name == "compilePermissionsGen" }.configureEach {
+            dependsOn(":core:shadowJar")
         }
     }
 }

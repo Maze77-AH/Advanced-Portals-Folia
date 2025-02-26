@@ -4,17 +4,21 @@ import com.sekwah.advancedportals.core.CoreListeners;
 import com.sekwah.advancedportals.core.repository.ConfigRepository;
 import com.sekwah.advancedportals.core.serializeddata.BlockLocation;
 import com.sekwah.advancedportals.core.services.PortalServices;
-import com.sekwah.advancedportals.shadowed.inject.Inject;
 import com.sekwah.advancedportals.spigot.connector.container.SpigotEntityContainer;
 import com.sekwah.advancedportals.spigot.connector.container.SpigotPlayerContainer;
 import com.sekwah.advancedportals.spigot.connector.container.SpigotWorldContainer;
 import com.sekwah.advancedportals.spigot.utils.ContainerHelpers;
+import java.lang.reflect.Method;
 import java.util.List;
+import javax.inject.Inject;
+import org.bukkit.Axis;
+import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockState;
 import org.bukkit.block.EndGateway;
+import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -26,8 +30,9 @@ import org.bukkit.event.world.ChunkLoadEvent;
 import org.bukkit.inventory.ItemStack;
 
 /**
- * Some of these will be passed to the core listener to handle the events,
- * others it's easier to just check directly.
+ * Some of these events are passed to the core listener to handle, while others
+ * are handled directly here. Reflection is used to safely call EndGateway#setAge(long)
+ * if available.
  */
 public class Listeners implements Listener {
     @Inject
@@ -39,7 +44,47 @@ public class Listeners implements Listener {
     @Inject
     private ConfigRepository configRepository;
 
-    // Entity and portal events
+    /**
+     * Reflection approach: If EndGateway#setAge(long) exists, store the Method here.
+     */
+    private static final Method endGatewaySetAgeMethod;
+    private static final boolean endGatewaySetAgeExists;
+
+    static {
+        Method tempMethod = null;
+        boolean tempExists = false;
+        try {
+            // Attempt to retrieve setAge(long) from EndGateway
+            tempMethod = EndGateway.class.getMethod("setAge", long.class);
+            tempExists = true;
+        } catch (NoSuchMethodException ignored) {
+        }
+        endGatewaySetAgeMethod = tempMethod;
+        endGatewaySetAgeExists = tempExists;
+    }
+
+    // Example helper to safely set Age:
+    private void disableEndGateway(BlockState state) {
+        if (!endGatewaySetAgeExists) {
+            return; // Not supported on this server version
+        }
+        if (!(state instanceof EndGateway)) {
+            return;
+        }
+        try {
+            endGatewaySetAgeMethod.invoke(state, Long.MIN_VALUE);
+            state.update();
+        } catch (Exception ex) {
+            // If something goes wrong (e.g. security or invocation issues),
+            // just ignore or log it.
+            Bukkit.getLogger().warning("Failed to invoke EndGateway#setAge via reflection: " + ex.getMessage());
+        }
+    }
+
+    // ------------------------------------------------------------------------
+    // Player / Entity events
+    // ------------------------------------------------------------------------
+
     @EventHandler
     public void onJoinEvent(PlayerJoinEvent event) {
         coreListeners.playerJoin(new SpigotPlayerContainer(event.getPlayer()));
@@ -53,14 +98,15 @@ public class Listeners implements Listener {
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onMoveEvent(PlayerMoveEvent event) {
         Location to = event.getTo();
+        if (to == null) return;
         coreListeners.playerMove(new SpigotPlayerContainer(event.getPlayer()),
-                                 ContainerHelpers.toPlayerLocation(to));
+                ContainerHelpers.toPlayerLocation(to));
     }
 
     @EventHandler(ignoreCancelled = true)
     public void onEntityPortalEvent(EntityPortalEvent event) {
-        if (!this.coreListeners.entityPortalEvent(
-                new SpigotEntityContainer(event.getEntity()))) {
+        Entity ent = event.getEntity();
+        if (!this.coreListeners.entityPortalEvent(new SpigotEntityContainer(ent))) {
             event.setCancelled(true);
         }
     }
@@ -76,11 +122,11 @@ public class Listeners implements Listener {
 
     @EventHandler(ignoreCancelled = true)
     public void onDamEvent(EntityDamageEvent event) {
-        if (event.getEntity() instanceof Player
-            && (event.getCause() == EntityDamageEvent.DamageCause.LAVA
-                || event.getCause() == EntityDamageEvent.DamageCause.FIRE
-                || event.getCause()
-                    == EntityDamageEvent.DamageCause.FIRE_TICK)) {
+        if (!(event.getEntity() instanceof Player)) return;
+        EntityDamageEvent.DamageCause cause = event.getCause();
+        if (cause == EntityDamageEvent.DamageCause.LAVA
+            || cause == EntityDamageEvent.DamageCause.FIRE
+            || cause == EntityDamageEvent.DamageCause.FIRE_TICK) {
             if (this.coreListeners.preventEntityCombust(
                     new SpigotEntityContainer(event.getEntity()))) {
                 event.setCancelled(true);
@@ -96,35 +142,39 @@ public class Listeners implements Listener {
         }
     }
 
+    // ------------------------------------------------------------------------
+    // Block / Portal region events
+    // ------------------------------------------------------------------------
+
     @EventHandler(priority = EventPriority.HIGH)
     public void onBlockPlace(BlockPlaceEvent event) {
-        if (!event.isCancelled()) {
-            Location blockloc = event.getBlock().getLocation();
+        if (event.isCancelled()) return;
+        Location blockloc = event.getBlock().getLocation();
+        if (blockloc.getWorld() == null) return;
 
-            if (blockloc.getWorld() == null)
-                return;
+        ItemStack inHand = event.getItemInHand();
+        if (inHand.getItemMeta() == null) return;
 
-            if (event.getItemInHand().getItemMeta() == null)
-                return;
+        boolean allowed = coreListeners.blockPlace(
+            new SpigotPlayerContainer(event.getPlayer()),
+            new BlockLocation(blockloc.getWorld().getName(),
+                              blockloc.getBlockX(),
+                              blockloc.getBlockY(),
+                              blockloc.getBlockZ()),
+            event.getBlockPlaced().getType().toString(),
+            inHand.getType().toString(),
+            inHand.getItemMeta().getDisplayName()
+        );
 
-            if (!this.coreListeners.blockPlace(
-                    new SpigotPlayerContainer(event.getPlayer()),
-                    new BlockLocation(
-                        blockloc.getWorld().getName(), blockloc.getBlockX(),
-                        blockloc.getBlockY(), blockloc.getBlockZ()),
-                    event.getBlockPlaced().getType().toString(),
-                    event.getItemInHand().getType().toString(),
-                    event.getItemInHand().getItemMeta().getDisplayName())) {
-                event.setCancelled(true);
-            }
+        if (!allowed) {
+            event.setCancelled(true);
         }
     }
 
     @EventHandler(priority = EventPriority.HIGH)
     public void onPhysicsEvent(BlockPhysicsEvent event) {
         if (!coreListeners.physicsEvent(
-                ContainerHelpers.toBlockLocation(
-                    event.getBlock().getLocation()),
+                ContainerHelpers.toBlockLocation(event.getBlock().getLocation()),
                 event.getBlock().getType().toString())) {
             event.setCancelled(true);
         }
@@ -137,60 +187,57 @@ public class Listeners implements Listener {
 
     @EventHandler
     public void onItemInteract(PlayerInteractEvent event) {
-        if (!event.isCancelled()
-            && (event.getAction() == Action.LEFT_CLICK_BLOCK
-                || event.getAction() == Action.RIGHT_CLICK_BLOCK)
-            && event.getItem() != null) {
-            if (event.getClickedBlock() == null)
-                return;
-            if (event.getItem().getItemMeta() == null)
-                return;
+        if (event.isCancelled()) return;
+        if (event.getItem() == null || event.getClickedBlock() == null) return;
+        if (event.getItem().getItemMeta() == null) return;
 
-            Location blockloc = event.getClickedBlock().getLocation();
+        Location blockloc = event.getClickedBlock().getLocation();
+        if (blockloc.getWorld() == null) return;
 
-            if (blockloc.getWorld() == null)
-                return;
-
-            boolean allowEvent = this.coreListeners.playerInteractWithBlock(
-                new SpigotPlayerContainer(event.getPlayer()),
-                event.getClickedBlock().getType().toString(),
-                event.getMaterial().toString(),
-                event.getItem().getItemMeta().getDisplayName(),
-                new BlockLocation(blockloc.getWorld().getName(),
-                                  blockloc.getBlockX(), blockloc.getBlockY(),
-                                  blockloc.getBlockZ()),
-                event.getAction() == Action.LEFT_CLICK_BLOCK);
-            event.setCancelled(!allowEvent);
+        boolean allowEvent = coreListeners.playerInteractWithBlock(
+            new SpigotPlayerContainer(event.getPlayer()),
+            event.getClickedBlock().getType().toString(),
+            event.getMaterial().toString(),
+            event.getItem().getItemMeta().getDisplayName(),
+            new BlockLocation(blockloc.getWorld().getName(),
+                              blockloc.getBlockX(),
+                              blockloc.getBlockY(),
+                              blockloc.getBlockZ()),
+            event.getAction() == Action.LEFT_CLICK_BLOCK
+        );
+        if (!allowEvent) {
+            event.setCancelled(true);
         }
     }
 
     @EventHandler(ignoreCancelled = true)
     public void spawnMobEvent(CreatureSpawnEvent event) {
-        if (event.getSpawnReason()
-                == CreatureSpawnEvent.SpawnReason.NETHER_PORTAL
-            && portalServices.inPortalRegionProtected(
+        if (event.getSpawnReason() == CreatureSpawnEvent.SpawnReason.NETHER_PORTAL) {
+            if (portalServices.inPortalRegionProtected(
                 ContainerHelpers.toPlayerLocation(event.getLocation()))) {
-            event.setCancelled(true);
+                event.setCancelled(true);
+            }
         }
     }
-
-    // Block events
 
     @EventHandler(priority = EventPriority.HIGH)
     public void onBlockFromTo(BlockFromToEvent event) {
         if (!configRepository.getStopWaterFlow()) {
             return;
         }
-        if (!coreListeners.blockPlace(null,
-                                      ContainerHelpers.toBlockLocation(
-                                          event.getBlock().getLocation()),
-                                      event.getBlock().getType().toString(),
-                                      null, null)
-            || !coreListeners.blockPlace(null,
-                                         ContainerHelpers.toBlockLocation(
-                                             event.getToBlock().getLocation()),
-                                         event.getBlock().getType().toString(),
-                                         null, null)) {
+        boolean fromAllowed = coreListeners.blockPlace(
+            null,
+            ContainerHelpers.toBlockLocation(event.getBlock().getLocation()),
+            event.getBlock().getType().toString(),
+            null, null
+        );
+        boolean toAllowed = coreListeners.blockPlace(
+            null,
+            ContainerHelpers.toBlockLocation(event.getToBlock().getLocation()),
+            event.getBlock().getType().toString(),
+            null, null
+        );
+        if (!fromAllowed || !toAllowed) {
             event.setCancelled(true);
         }
     }
@@ -198,24 +245,25 @@ public class Listeners implements Listener {
     @EventHandler(priority = EventPriority.HIGH)
     public void onBlockBreak(BlockBreakEvent event) {
         ItemStack itemInHand = event.getPlayer().getItemInHand();
-        if (!coreListeners.blockBreak(
-                new SpigotPlayerContainer(event.getPlayer()),
-                ContainerHelpers.toBlockLocation(
-                    event.getBlock().getLocation()),
-                event.getBlock().getType().toString(),
-                itemInHand == null ? null : itemInHand.getType().toString(),
-                itemInHand == null || itemInHand.getItemMeta() == null
-                    ? null
-                    : itemInHand.getItemMeta().getDisplayName())) {
+        String handType = itemInHand == null ? null : itemInHand.getType().toString();
+        String handDisplay = (itemInHand == null || itemInHand.getItemMeta() == null)
+                ? null : itemInHand.getItemMeta().getDisplayName();
+
+        boolean allowed = coreListeners.blockBreak(
+            new SpigotPlayerContainer(event.getPlayer()),
+            ContainerHelpers.toBlockLocation(event.getBlock().getLocation()),
+            event.getBlock().getType().toString(),
+            handType,
+            handDisplay
+        );
+        if (!allowed) {
             event.setCancelled(true);
         }
     }
 
     @EventHandler(priority = EventPriority.HIGH)
     public void onExplosion(EntityExplodeEvent event) {
-        if (!configRepository.getPortalProtection())
-            return;
-
+        if (!configRepository.getPortalProtection()) return;
         List<Block> blockList = event.blockList();
         for (int i = 0; i < blockList.size(); i++) {
             Block block = blockList.get(i);
@@ -232,19 +280,18 @@ public class Listeners implements Listener {
         if (!configRepository.getDisableGatewayBeam()) {
             return;
         }
-        SpigotWorldContainer world = new SpigotWorldContainer(event.getWorld());
+        // We just check if the chunk has any EndGateway inside a portal region.
         BlockState[] tileEntities = event.getChunk().getTileEntities();
-        for (BlockState block : tileEntities) {
-            if (block.getType() == Material.END_GATEWAY) {
-                Location loc = block.getLocation();
+        for (BlockState blockState : tileEntities) {
+            if (blockState.getType() == Material.END_GATEWAY) {
+                Location loc = blockState.getLocation();
+                // Check if in portal region with radius=2
                 if (portalServices.inPortalRegion(
-                        new BlockLocation(loc.getWorld().getName(),
-                                          loc.getBlockX(), loc.getBlockY(),
-                                          loc.getBlockZ()),
-                        2)) {
-                    EndGateway tileState = (EndGateway) block;
-                    tileState.setAge(Long.MIN_VALUE);
-                    tileState.update();
+                    new BlockLocation(loc.getWorld().getName(),
+                                      loc.getBlockX(), loc.getBlockY(),
+                                      loc.getBlockZ()), 2)) {
+                    // Attempt reflection-based setAge(Long.MIN_VALUE)
+                    disableEndGateway(blockState);
                 }
             }
         }

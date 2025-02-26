@@ -38,7 +38,6 @@ dependencies {
     // For spigot api
     // We are using an older version to try and ensure that we are not using anything new older versions cant use.
     compileOnly "org.spigotmc:spigot-api:1.13.2-R0.1-SNAPSHOT"
-    compileOnly "net.md-5:bungeecord-api:1.16-R0.4"
     // compileOnly "com.mojang:authlib:3.5.41"
     // Be careful to only use what you need to from paper, otherwise it will become incompatible with spigot.
     // compileOnly 'com.destroystokyo.paper:paper-api:1.16.5-R0.1-SNAPSHOT'
@@ -49,8 +48,6 @@ dependencies {
 
     includeLibs project(':lang')
     includeLibs project(':core')
-    includeLibs project(':bungee')
-    includeLibs project(':velocity')
 }
 
 tasks.named('compileJava') {
@@ -58,7 +55,7 @@ tasks.named('compileJava') {
 }
 
 jar {
-    dependsOn(':bungee:jar', ':lang:jar', ':proxycore:jar', ':velocity:jar')
+    dependsOn(':lang:jar', ':proxycore:jar')
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 
     // Filters the files out that are in the build folders. Look to see if there is a better way to do this?
@@ -259,7 +256,7 @@ modrinth {
     projectId = project.modrinth_slug
     versionType = "release"
     uploadFile = jar
-    loaders = ["spigot", "bukkit", "paper", "velocity", "waterfall", "bungeecord", "purpur"]
+    loaders = ["folia", "paper"]
     gameVersions = supportedVersions
     changelog = getReleaseChangelog()
     versionName = "Spigot [MC 1.13+] " + getVersion()

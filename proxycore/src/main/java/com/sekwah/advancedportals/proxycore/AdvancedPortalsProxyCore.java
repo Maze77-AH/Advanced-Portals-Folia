@@ -11,9 +11,9 @@ import com.sekwah.advancedportals.proxycore.connector.container.ProxyContainer;
 import com.sekwah.advancedportals.proxycore.connector.container.ProxyJoinData;
 import com.sekwah.advancedportals.proxycore.connector.container.ProxyPlayerContainer;
 import com.sekwah.advancedportals.proxycore.connector.container.ProxyServerContainer;
-import com.sekwah.advancedportals.shadowed.guava.io.ByteArrayDataInput;
-import com.sekwah.advancedportals.shadowed.guava.io.ByteStreams;
 import java.util.HashMap;
+import com.google.common.io.ByteArrayDataInput;
+import com.google.common.io.ByteStreams;
 
 public class AdvancedPortalsProxyCore {
     private final InfoLogger logger;
