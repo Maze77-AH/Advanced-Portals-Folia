@@ -5,7 +5,7 @@ author: sekwah41
 folia-supported: true
 description: An advanced portals plugin for bukkit.
 api-version: 1.13
-softdepend: [PlaceholderAPI]
+softdepend: [PlaceholderAPI, Vault]
 commands:
   portal:
     description: The main command for the advanced portals
