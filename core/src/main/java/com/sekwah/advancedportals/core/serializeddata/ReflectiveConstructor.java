@@ -11,10 +11,10 @@ import java.util.Map;
 import org.yaml.snakeyaml.LoaderOptions;
 import org.yaml.snakeyaml.constructor.Constructor;
 import org.yaml.snakeyaml.nodes.*;
-import sun.misc.Unsafe;
+// import sun.misc.Unsafe; // Removed due to access restrictions
 
 public class ReflectiveConstructor<T> extends Constructor {
-    private static final Unsafe unsafe = getUnsafe();
+    // private static final Unsafe unsafe = getUnsafe(); // Removed due to access restrictions
     private final Class<T> clazz;
 
     @Inject
@@ -107,7 +107,7 @@ public class ReflectiveConstructor<T> extends Constructor {
                 infoLogger.info("No default constructor found for "
                                 + currentClass.getName()
                                 + ", using unsafe allocation.");
-                instance = unsafe.allocateInstance(currentClass);
+                instance = createInstanceWithoutConstructor(currentClass);
             }
 
             Map<String, Object> mappedValues =
@@ -215,13 +215,13 @@ public class ReflectiveConstructor<T> extends Constructor {
         field.set(instance, value);
     }
 
-    private static Unsafe getUnsafe() {
+    private static Object createInstanceWithoutConstructor(Class<?> clazz) {
         try {
-            Field f = Unsafe.class.getDeclaredField("theUnsafe");
-            f.setAccessible(true);
-            return (Unsafe) f.get(null);
+            java.lang.reflect.Constructor<?> constructor = clazz.getDeclaredConstructor();
+            constructor.setAccessible(true);
+            return constructor.newInstance();
         } catch (Exception e) {
-            throw new RuntimeException("Failed to get Unsafe instance", e);
+            throw new RuntimeException("Failed to create instance of " + clazz.getName(), e);
         }
     }
 }
