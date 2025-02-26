@@ -9,7 +9,7 @@
 [![](https://img.shields.io/github/stars/sekwah41/Advanced-Portals.svg?style=for-the-badge&logo=github)](https://github.com/sekwah41/Advanced-Portals/stargazers)
 [![](https://img.shields.io/github/license/sekwah41/Advanced-Portals.svg?logo=github&style=for-the-badge)](https://github.com/sekwah41/Advanced-Portals/blob/master/LICENSE.md)
 
-Advanced Portals
+Advanced Portals - Folia
 ==============
 An advanced portals plugin designed to have a wide range of features which are easy to use. It adds a bunch of commands to create and edit portals and destinations.
 
